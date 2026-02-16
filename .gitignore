@@ -1,0 +1,4 @@
+bin/
+caveo
+*.exe
+.vscode/
