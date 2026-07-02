@@ -23,6 +23,12 @@ const (
 	TargetKeyLength   = 32
 )
 
+const (
+	MaxMemory      = 256 * 1024 //256MB
+	MaxIterations  = 32
+	MaxParallelism = 16
+)
+
 // holds the argon2 params
 // these settings determine computational cost
 type config struct {
@@ -121,6 +127,10 @@ func (s *Service) Verify(password, encodedHash string) (bool, error) {
 	n, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &memory, &iterations, &parallelism)
 	if err != nil || n != 3 {
 		return false, fmt.Errorf("Failed to parse parameters: %v", err)
+	}
+
+	if memory > MaxMemory || iterations > MaxIterations || parallelism > MaxParallelism {
+		return false, fmt.Errorf("Hash parameters exceed maximum allowed values")
 	}
 
 	//decode salt and hash (base64->raw bytes)
