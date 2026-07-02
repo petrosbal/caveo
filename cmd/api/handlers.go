@@ -29,56 +29,76 @@ type VerifyResponse struct {
 	Match bool `json:"match"`
 }
 
+type ErrorResponse struct {
+	Error string `json:"error"`
+}
+
 func (app *Application) HandleHash(w http.ResponseWriter, r *http.Request) {
 	var req HashRequest
 
 	//decode json body
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		app.respondWithError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
 	// basic input validation
 	if req.Password == "" {
-		http.Error(w, "Password is required", http.StatusBadRequest)
+		app.respondWithError(w, http.StatusBadRequest, "Password is required")
 		return
 	}
 
 	// call service
 	hash, err := app.hasher.Hash(req.Password)
 	if err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		app.respondWithError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
 	// send response
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(HashResponse{Hash: hash}); err != nil {
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-	}
+	app.respondWithJSON(w, http.StatusOK, HashResponse{Hash: hash})
 }
 
 func (app *Application) HandleVerify(w http.ResponseWriter, r *http.Request) {
 	var req VerifyRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		app.respondWithError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
 	if req.Password == "" || req.Hash == "" {
-		http.Error(w, "Password and hash are required", http.StatusBadRequest)
+		app.respondWithError(w, http.StatusBadRequest, "Password and hash are required")
 		return
 	}
 
 	match, err := app.hasher.Verify(req.Password, req.Hash)
 	if err != nil {
-		http.Error(w, "Invalid hash or password", http.StatusBadRequest)
+		app.respondWithError(w, http.StatusBadRequest, "Invalid hash or password")
+		return
+	}
+
+	app.respondWithJSON(w, http.StatusOK, VerifyResponse{Match: match})
+}
+
+func (app *Application) HandleNotFound(w http.ResponseWriter, r *http.Request) {
+	app.respondWithError(w, http.StatusNotFound, "Not Found")
+}
+
+func (app *Application) respondWithError(w http.ResponseWriter, status int, message string) {
+	app.respondWithJSON(w, status, ErrorResponse{Error: message})
+}
+
+func (app *Application) respondWithJSON(w http.ResponseWriter, status int, payload any) {
+	b, err := json.Marshal(payload)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error":"Failed to encode response"}`))
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(VerifyResponse{Match: match}); err != nil {
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-	}
+	w.WriteHeader(status)
+	w.Write(b)
 }

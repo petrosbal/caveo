@@ -2,12 +2,12 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 	"github.com/petrosbal/caveo/internal/hasher"
 )
 
@@ -18,27 +18,25 @@ func main() {
 		hasher: hashService,
 	}
 
-	//setup router
-	r := chi.NewRouter()
+	port := getEnv("PORT", "8080")
 
-	//standard middleware
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(60 * time.Second))
+	srv := &http.Server{
+		Addr:         ":" + port,
+		Handler:      app.Routes(),
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+	}
 
-	r.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			r.Body = http.MaxBytesReader(w, r.Body, 1024*1024) // 1MB limit
-			next.ServeHTTP(w, r)
-		})
-	})
+	printBanner(os.Stdout, port)
 
-	//expose endpoints
-	r.Post("/hash", app.HandleHash)
-	r.Post("/verify", app.HandleVerify)
+	if err := srv.ListenAndServe(); err != nil {
+		log.Fatal(err)
+	}
+}
 
+func printBanner(w io.Writer, port string) {
 	//start server
-	fmt.Printf(`
+	fmt.Fprintf(w, `
    ______                     
   / ____/___ __   _____  ____ 
  / /   / __ `+"`"+`/ | / / _ \/ __ \
@@ -54,15 +52,12 @@ func main() {
 	
 `, "\033[32m", "\033[0m")
 
-	log.Println("Caveo is listening at port :8080")
-	srv := &http.Server{
-		Addr:         ":8080",
-		Handler:      r,
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 10 * time.Second,
-	}
+	log.Println("Caveo is listening at port: ", port)
+}
 
-	if err := srv.ListenAndServe(); err != nil {
-		log.Fatal(err)
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
 	}
+	return fallback
 }
