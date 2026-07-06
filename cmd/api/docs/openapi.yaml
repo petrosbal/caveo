@@ -1,0 +1,121 @@
+openapi: 3.0.3
+info:
+  title: Caveo
+  description: >-
+    Stateless Argon2id password hashing and verification microservice. Offloads
+    CPU/memory-intensive hashing off application servers. There is no database or
+    persistence: the encoded hash string is self-describing and carries its own
+    parameters, so Verify reads them back out of the hash rather than from config.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080
+    description: Local instance (PORT env var, default 8080)
+paths:
+  /hash:
+    post:
+      operationId: hashPassword
+      summary: Hash a password
+      description: >-
+        Generates a fresh CSPRNG salt and returns a PHC-encoded Argon2id hash string
+        of the form $argon2id$v=19$m=..,t=..,p=..$salt$hash. Parameters are the
+        service defaults (m=19456, t=2, p=1).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HashRequest'
+      responses:
+        '200':
+          description: Hash created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HashResponse'
+        '400':
+          description: Password missing or request body is not valid JSON.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Hashing failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /verify:
+    post:
+      operationId: verifyPassword
+      summary: Verify a password against an encoded hash
+      description: >-
+        Parses the Argon2id parameters out of the supplied encoded hash and does a
+        constant-time comparison. Rejects hashes whose m/t/p exceed the service
+        bounds (m<=262144, t<=32, p<=16) before hashing, so a crafted hash cannot
+        force a huge allocation. A wrong password returns 200 with match=false; a
+        malformed or oversized hash returns 400.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyRequest'
+      responses:
+        '200':
+          description: Comparison completed. See the match field for the result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerifyResponse'
+        '400':
+          description: Missing fields, malformed body, or an invalid/oversized hash.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  schemas:
+    HashRequest:
+      type: object
+      required: [password]
+      properties:
+        password:
+          type: string
+          description: Plaintext password to hash.
+          example: correct horse battery staple
+    HashResponse:
+      type: object
+      required: [hash]
+      properties:
+        hash:
+          type: string
+          description: PHC-encoded Argon2id hash, safe to store as-is.
+          example: $argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHR2YWx1ZXg$dGhpc2lzYWZha2VoYXNodmFsdWVmb3Jkb2Nz
+    VerifyRequest:
+      type: object
+      required: [password, hash]
+      properties:
+        password:
+          type: string
+          description: Plaintext password to check.
+          example: correct horse battery staple
+        hash:
+          type: string
+          description: Previously produced PHC-encoded Argon2id hash.
+          example: $argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHR2YWx1ZXg$dGhpc2lzYWZha2VoYXNodmFsdWVmb3Jkb2Nz
+    VerifyResponse:
+      type: object
+      required: [match]
+      properties:
+        match:
+          type: boolean
+          description: True if the password matches the hash.
+          example: true
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Human-readable error message.
+          example: Password is required
