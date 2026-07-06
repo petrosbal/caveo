@@ -1,18 +1,20 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/petrosbal/caveo/internal/hasher"
 )
 
 func main() {
-	//init service with OWASP defaults
 	hashService := hasher.NewService()
 	app := &Application{
 		hasher: hashService,
@@ -27,15 +29,35 @@ func main() {
 		WriteTimeout: 10 * time.Second,
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatal(err)
+		}
+	}()
+
 	printBanner(os.Stdout, port)
 
-	if err := srv.ListenAndServe(); err != nil {
-		log.Fatal(err)
+	<-ctx.Done()
+	stop()
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Graceful shutdown failed: %v", err)
 	}
 }
 
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
 func printBanner(w io.Writer, port string) {
-	//start server
 	fmt.Fprintf(w, `
    ______                     
   / ____/___ __   _____  ____ 
@@ -53,11 +75,4 @@ func printBanner(w io.Writer, port string) {
 `, "\033[32m", "\033[0m")
 
 	log.Println("Caveo is listening at port: ", port)
-}
-
-func getEnv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
 }
