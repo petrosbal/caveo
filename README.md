@@ -81,6 +81,11 @@ Verifies a plaintext password against provided hash string. Derives parameters d
 | `400` | Bad Request | Malformed JSON, missing fields, or invalid hash format. |
 | `500` | Internal Server Error | Crypto failure or encoding error. |
 
+### Interactive Documentation
+
+* `GET /docs` - browsable API reference, rendered in-browser with RapiDoc.
+* `GET /docs/openapi.yaml` - the raw OpenAPI 3.0 spec, for use with API tooling.
+
 ## QA - Testing Strategy
 
 Testing covers both unit and integration levels:

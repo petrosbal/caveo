@@ -20,6 +20,9 @@ func (app *Application) Routes() http.Handler {
 	routes := []route{
 		{"POST", "/hash", app.HandleHash},
 		{"POST", "/verify", app.HandleVerify},
+		{"GET", "/docs", app.handleDocs},
+		{"GET", "/docs/openapi.yaml", app.handleOpenAPISpec},
+		{"GET", "/docs/rapidoc-min.js", app.handleRapiDocAsset},
 	}
 
 	r := chi.NewRouter()
