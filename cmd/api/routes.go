@@ -21,6 +21,8 @@ func (app *Application) Routes() http.Handler {
 	routes := []route{
 		{"POST", "/hash", app.HandleHash, true},
 		{"POST", "/verify", app.HandleVerify, true},
+		{"GET", "/healthz", app.HandleHealthz, false},
+		{"GET", "/readyz", app.HandleReadyz, false},
 		{"GET", "/docs", app.handleDocs, false},
 		{"GET", "/docs/openapi.yaml", app.handleOpenAPISpec, false},
 		{"GET", "/docs/rapidoc-min.js", app.handleRapiDocAsset, false},
