@@ -9,7 +9,8 @@ import (
 
 // holds the dependencies for the HTTP handler
 type Application struct {
-	hasher *hasher.Service
+	hasher  *hasher.Service
+	limiter *Limiter
 }
 
 type HashRequest struct {

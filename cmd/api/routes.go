@@ -15,14 +15,15 @@ func (app *Application) Routes() http.Handler {
 		method  string
 		pattern string
 		handler http.HandlerFunc
+		heavy   bool
 	}
 
 	routes := []route{
-		{"POST", "/hash", app.HandleHash},
-		{"POST", "/verify", app.HandleVerify},
-		{"GET", "/docs", app.handleDocs},
-		{"GET", "/docs/openapi.yaml", app.handleOpenAPISpec},
-		{"GET", "/docs/rapidoc-min.js", app.handleRapiDocAsset},
+		{"POST", "/hash", app.HandleHash, true},
+		{"POST", "/verify", app.HandleVerify, true},
+		{"GET", "/docs", app.handleDocs, false},
+		{"GET", "/docs/openapi.yaml", app.handleOpenAPISpec, false},
+		{"GET", "/docs/rapidoc-min.js", app.handleRapiDocAsset, false},
 	}
 
 	r := chi.NewRouter()
@@ -41,7 +42,11 @@ func (app *Application) Routes() http.Handler {
 	//expose endpoints
 	allowed := map[string][]string{}
 	for _, rt := range routes {
-		r.MethodFunc(rt.method, rt.pattern, rt.handler)
+		var h http.Handler = rt.handler
+		if rt.heavy {
+			h = app.shedWhenSaturated(h)
+		}
+		r.Method(rt.method, rt.pattern, h)
 		allowed[rt.pattern] = append(allowed[rt.pattern], rt.method)
 	}
 
