@@ -1,140 +1,72 @@
-# Caveo: Argon2id Password Hashing Microservice in Go
+# Caveo
 
-Caveo is a microservice for password hashing and verification, written in Go. It implements **Argon2id**.
-The service is designed as a stateless standalone component to offload cryptographic operations from main application servers.
+Stateless Argon2id password hashing and verification service, in Go. Offloads CPU- and memory-intensive hashing off your application servers. No database, no persistence: each hash is a self-describing `$argon2id$v=19$m=...$salt$hash` string that carries its own parameters, so `verify` reads them back out of the hash rather than from config.
 
-## Overview
+- Go 1.25+, `golang.org/x/crypto/argon2`
+- Ships as a distroless, non-root, static image
 
-* **Language:** Go 1.25+
-* **Algorithm:** Argon2id (`golang.org/x/crypto/argon2`)
-* **Deployment:** Docker (Distroless, non-root, multi-stage build).
+## Structure
 
-## Project Structure
-
-```Plaintext
+```
 .
-├── cmd/api/            # Entry point and HTTP handlers
-├── internal/hasher/    # Core Argon2id implementation
-├── Dockerfile          # Multi-stage build definition
-└── Makefile            # Build and test automation
+├── cmd/api/            # HTTP layer: handlers, routing, server lifecycle
+├── internal/hasher/    # Argon2id core (pure, no HTTP)
+├── Dockerfile
+└── Makefile
 ```
 
-## Design Rationale
+## Security
 
-**Why a microservice?**
-* Argon2id is CPU and memory-intensive. Running these operations on a main API server can degrade throughput for all users. 
-* Caveo isolates this resource load, allowing for horizontal scaling and better performance under load.
+- OWASP Argon2id defaults (19 MiB, 2 iterations, parallelism 1), baked in at build time.
+- Salts from `crypto/rand`; comparison via `subtle.ConstantTimeCompare`.
+- `verify` clamps the `m`/`t`/`p` parsed out of a submitted hash, so a crafted hash can't force a huge allocation.
+- 1 MiB request body limit; 5s/10s read/write timeouts.
+- Concurrent hashes are capped and shed with `503` past the limit (see Configuration).
 
-## Security Implementation
+## API
 
-This project adheres to strict cryptographic standards:
-1. **Parameter Tuning:** Configured with OWASP parameters (19MB RAM, 2 Iterations, 1 Parallelism). 
-2. **Random Salt Generation:** High entropy CSPRNG via crypto/rand instead of typical math/rand.
-3. **Timing Attack Mitigation:** `subtle.ConstantTimeCompare` used to prevent timing analysis attacks.
-4. **DoS Protection:**
-    * 1MB limit on request bodies.
-    * Aggressive read/write timeouts (5s/10s) and global request timeout (60s) to prevent resource exhaustion.
+Two endpoints. Full spec at `GET /docs` (RapiDoc) or `GET /docs/openapi.yaml`.
 
-## API Reference
-
-The service exposes two endpoints on port `8080`.
-
-### `POST /hash`
-
-Generates a random salt and returns the Argon2id hash.
-
-**Request:**
+`POST /hash`
 ```json
-{ "password": "user_input_password" }
+{ "password": "..." }  ->  { "hash": "$argon2id$v=19$m=19456,t=2,p=1$..." }
 ```
 
-**Response:**
-
+`POST /verify`
 ```json
-{ "hash": "$argon2id$v=19$m=19456,t=2,p=1$..." }
+{ "password": "...", "hash": "$argon2id$..." }  ->  { "match": true }
 ```
 
-### `POST /verify`
+Errors are always JSON (`{ "error": "..." }`): `400` for bad input or a malformed hash, `500` for a hashing failure, `503` at capacity.
 
-Verifies a plaintext password against provided hash string. Derives parameters directly from the hash.
-
-**Request:**
-
-```json
-{
-  "password": "user_input_password",
-  "hash": "$argon2id$v=19$m=19456,t=2,p=1$..."
-}
-```
-
-**Response (200 OK):**
-
-```json
-{ "match": true }
-```
-
-### Status Codes
-
-| Code | Description | Reason |
-| :--- | :--- | :--- |
-| `200` | OK | Operation successful. |
-| `400` | Bad Request | Malformed JSON, missing fields, or invalid hash format. |
-| `500` | Internal Server Error | Crypto failure or encoding error. |
-
-### Interactive Documentation
-
-* `GET /docs` - browsable API reference, rendered in-browser with RapiDoc.
-* `GET /docs/openapi.yaml` - the raw OpenAPI 3.0 spec, for use with API tooling.
-
-## QA - Testing Strategy
-
-Testing covers both unit and integration levels:
-
-* **Unit**: Logic verification for salt uniqueness and vector correctness (`internal/hasher`).
-
-* **Integration**: httptest validation for middleware chains and HTTP contracts (`cmd/api`).
-
-* **Negative Testing**: Explicit coverage for malformed JSON, empty payloads, and invalid hash formats.
+Health: `GET /healthz` (liveness), `GET /readyz` (readiness; `503` while draining on shutdown).
 
 ## Configuration
 
-Configuration is via environment variables:
+Environment variables. Invalid values fail fast at startup.
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `PORT` | `8080` | HTTP listen port. |
-| `CAVEO_MAX_CONCURRENT_REQUESTS` | CPU count (`GOMAXPROCS`) | Caps concurrent Argon2 operations; requests beyond the cap are shed with `503` + `Retry-After` to bound memory and CPU. Must be a positive integer; an invalid value fails fast at startup. |
+| `CAVEO_MAX_CONCURRENT_REQUESTS` | CPU count (`GOMAXPROCS`) | Cap on concurrent Argon2 operations; requests past the cap get `503` + `Retry-After`. Positive integer. |
+| `CAVEO_DRAIN_DELAY` | `5s` | On shutdown, how long to keep serving after `/readyz` flips to `503`, so a load balancer can deregister before draining. Non-negative Go duration (`0s` disables). |
 
-## Local Development
-### Prerequisites
-* **Go** (1.25+)
-* **Make**
-* **gotestsum** (install via `go install gotest.tools/gotestsum@latest`)
+## Development
 
-### Commands
+Requires Go 1.25+ and [`gotestsum`](https://github.com/gotestyourself/gotestsum) (`go install gotest.tools/gotestsum@latest`).
 
-The project uses a `Makefile` for standard operations:
-
-```Bash
-make run    # Starts the API server locally on :8080
-make test   # Runs unit and integration tests 
-make build  # Compiles the binary to bin/caveo
-make clean  # Removes build artifacts
+```
+make run      # serve on :8080
+make test     # unit + integration
+make build    # -> bin/caveo
+make clean
 ```
 
-## Docker Deployment
+## Docker
 
-### Container Specifications
-The Dockerfile utilizes a multi-stage build process to ensure the final image contains only the binary and necessary root certificates.
+Multi-stage build into `gcr.io/distroless/static-debian12:nonroot`, non-root (UID 65532), static binary with symbols stripped.
 
-* Base Image: `gcr.io/distroless/static-debian12:nonroot`
-* User: Runs as non-root (`UID: 65532`)
-* Binary: Statically linked with debug symbols stripped (`-ldflags="-s -w"`).
-
-
-### Build & Run:
-
-```Bash
+```
 docker build -t caveo .
 docker run -p 8080:8080 caveo
 ```

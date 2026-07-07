@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"sync/atomic"
 
 	"github.com/petrosbal/caveo/internal/hasher"
 )
@@ -11,6 +12,7 @@ import (
 type Application struct {
 	hasher  *hasher.Service
 	limiter *Limiter
+	ready   atomic.Bool
 }
 
 type HashRequest struct {
@@ -80,6 +82,18 @@ func (app *Application) HandleVerify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	app.respondWithJSON(w, http.StatusOK, VerifyResponse{Match: match})
+}
+
+func (app *Application) HandleHealthz(w http.ResponseWriter, r *http.Request) {
+	app.respondWithJSON(w, http.StatusOK, map[string]string{"status": "healthy"})
+}
+
+func (app *Application) HandleReadyz(w http.ResponseWriter, r *http.Request) {
+	if !app.ready.Load() {
+		app.respondWithError(w, http.StatusServiceUnavailable, "not ready")
+	} else {
+		app.respondWithJSON(w, http.StatusOK, map[string]string{"status": "ready"})
+	}
 }
 
 func (app *Application) HandleNotFound(w http.ResponseWriter, r *http.Request) {
