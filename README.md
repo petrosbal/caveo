@@ -96,6 +96,15 @@ Testing covers both unit and integration levels:
 
 * **Negative Testing**: Explicit coverage for malformed JSON, empty payloads, and invalid hash formats.
 
+## Configuration
+
+Configuration is via environment variables:
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `PORT` | `8080` | HTTP listen port. |
+| `CAVEO_MAX_CONCURRENT_REQUESTS` | CPU count (`GOMAXPROCS`) | Caps concurrent Argon2 operations; requests beyond the cap are shed with `503` + `Retry-After` to bound memory and CPU. Must be a positive integer; an invalid value fails fast at startup. |
+
 ## Local Development
 ### Prerequisites
 * **Go** (1.25+)

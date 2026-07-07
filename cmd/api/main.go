@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -16,11 +18,19 @@ import (
 
 func main() {
 	hashService := hasher.NewService()
-	app := &Application{
-		hasher: hashService,
+
+	limit, err := getConcurrencyLimit(os.LookupEnv)
+	if err != nil {
+		log.Fatalf("config: %v", err)
 	}
 
-	port := getEnv("PORT", "8080")
+	app := &Application{
+		hasher:  hashService,
+		limiter: NewLimiter(limit),
+	}
+	log.Printf("max concurrent requests: %d", limit)
+
+	port := getEnvString("PORT", "8080")
 
 	srv := &http.Server{
 		Addr:         ":" + port,
@@ -50,11 +60,23 @@ func main() {
 	}
 }
 
-func getEnv(key, fallback string) string {
+func getEnvString(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
 	return fallback
+}
+
+func getConcurrencyLimit(lookup func(string) (string, bool)) (int, error) {
+	v, ok := lookup("CAVEO_MAX_CONCURRENT_REQUESTS")
+	if !ok || v == "" {
+		return runtime.GOMAXPROCS(0), nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("CAVEO_MAX_CONCURRENT_REQUESTS must be a positive integer, got: %q", v)
+	}
+	return n, nil
 }
 
 func printBanner(w io.Writer, port string) {

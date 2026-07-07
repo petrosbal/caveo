@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -14,7 +15,8 @@ import (
 // small helper, maybe unnecessary. oh well
 func newTestApp() *Application {
 	return &Application{
-		hasher: hasher.NewService(),
+		hasher:  hasher.NewService(),
+		limiter: NewLimiter(runtime.GOMAXPROCS(0)), // default limit for tests
 	}
 }
 
