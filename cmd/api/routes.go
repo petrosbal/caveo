@@ -1,8 +1,14 @@
 package main
 
 import (
+	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -30,7 +36,8 @@ func (app *Application) Routes() http.Handler {
 
 	r := chi.NewRouter()
 
-	r.Use(middleware.Logger)
+	r.Use(requestID)
+	r.Use(app.logRequests)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
 
@@ -61,4 +68,51 @@ func (app *Application) Routes() http.Handler {
 	})
 
 	return r
+}
+
+func (app *Application) logRequests(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !app.logger.Enabled(r.Context(), slog.LevelDebug) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+		start := time.Now()
+		next.ServeHTTP(ww, r)
+		app.logger.Debug("request",
+			slog.String("method", r.Method),
+			slog.String("path", r.URL.Path),
+			slog.Int("status", ww.Status()),
+			slog.Int("bytes", ww.BytesWritten()),
+			slog.Duration("duration", time.Since(start)),
+			slog.String("request_id", middleware.GetReqID(r.Context())),
+		)
+	})
+}
+
+func requestID(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := r.Header.Get("X-Request-ID")
+		if id == "" {
+			id = newID()
+		}
+		ctx := context.WithValue(r.Context(), middleware.RequestIDKey, id)
+		w.Header().Set("X-Request-ID", id)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+var (
+	reqIDPrefix  string
+	reqIDCounter atomic.Uint64
+)
+
+func init() {
+	b := make([]byte, 6)
+	_, _ = rand.Read(b)
+	reqIDPrefix = base64.RawURLEncoding.EncodeToString(b)
+}
+
+func newID() string {
+	return reqIDPrefix + "-" + strconv.FormatUint(reqIDCounter.Add(1), 10)
 }

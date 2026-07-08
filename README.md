@@ -48,6 +48,7 @@ Environment variables. Invalid values fail fast at startup.
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `PORT` | `8080` | HTTP listen port. |
+| `CAVEO_LOG_LEVEL` | `info` | Logging level (`debug`/`info`/`warn`/`error`). |
 | `CAVEO_MAX_CONCURRENT_REQUESTS` | CPU count (`GOMAXPROCS`) | Cap on concurrent Argon2 operations; requests past the cap get `503` + `Retry-After`. Positive integer. |
 | `CAVEO_DRAIN_DELAY` | `5s` | On shutdown, how long to keep serving after `/readyz` flips to `503`, so a load balancer can deregister before draining. Non-negative Go duration (`0s` disables). |
 

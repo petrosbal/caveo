@@ -2,9 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"sync/atomic"
 
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/petrosbal/caveo/internal/hasher"
 )
 
@@ -13,6 +15,7 @@ type Application struct {
 	hasher  *hasher.Service
 	limiter *Limiter
 	ready   atomic.Bool
+	logger  *slog.Logger
 }
 
 type HashRequest struct {
@@ -54,7 +57,7 @@ func (app *Application) HandleHash(w http.ResponseWriter, r *http.Request) {
 	// call service
 	hash, err := app.hasher.Hash(req.Password)
 	if err != nil {
-		app.respondWithError(w, http.StatusInternalServerError, "Internal server error")
+		app.serverError(w, r, err, "/hash")
 		return
 	}
 
@@ -116,4 +119,13 @@ func (app *Application) respondWithJSON(w http.ResponseWriter, status int, paylo
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_, _ = w.Write(b)
+}
+
+func (app *Application) serverError(w http.ResponseWriter, r *http.Request, err error, route string) {
+	app.logger.LogAttrs(r.Context(), slog.LevelError, "server error",
+		slog.String("route", route),
+		slog.String("error", err.Error()),
+		slog.String("request_id", middleware.GetReqID(r.Context())),
+	)
+	app.respondWithError(w, http.StatusInternalServerError, "Internal server error")
 }
