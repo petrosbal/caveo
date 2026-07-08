@@ -4,13 +4,14 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -20,23 +21,47 @@ import (
 func main() {
 	hashService := hasher.NewService()
 
+	var levelVar slog.LevelVar
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: &levelVar,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if a.Value.Kind() == slog.KindDuration {
+				a.Value = slog.StringValue(a.Value.Duration().String())
+			}
+			return a
+		},
+	}))
+
+	level, err := getLogLevel(os.LookupEnv)
+	if err != nil {
+		logger.Error("config", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	levelVar.Set(level)
+
 	limit, err := getConcurrencyLimit(os.LookupEnv)
 	if err != nil {
-		log.Fatalf("config: %v", err)
+		logger.Error("config", slog.String("error", err.Error()))
+		os.Exit(1)
 	}
 	drainDelay, err := getDrainDelay(os.LookupEnv)
 	if err != nil {
-		log.Fatalf("config: %v", err)
+		logger.Error("config", slog.String("error", err.Error()))
+		os.Exit(1)
 	}
+	port := getEnvString("PORT", "8080")
 
 	app := &Application{
 		hasher:  hashService,
 		limiter: NewLimiter(limit),
+		logger:  logger,
 	}
-	log.Printf("max concurrent requests: %d", limit)
-	log.Printf("drain delay: %v", drainDelay)
-
-	port := getEnvString("PORT", "8080")
+	logger.Info("config",
+		slog.String("log_level", level.String()),
+		slog.Int("max_concurrent_requests", limit),
+		slog.Duration("drain_delay", drainDelay),
+		slog.String("port", port),
+	)
 
 	srv := &http.Server{
 		Addr:         ":" + port,
@@ -50,47 +75,64 @@ func main() {
 
 	ln, err := net.Listen("tcp", srv.Addr)
 	if err != nil {
-		log.Fatalf("failed to listen on port %s: %v", port, err)
+		logger.Error("listen failed", slog.String("port", port), slog.String("error", err.Error()))
+		os.Exit(1)
 	}
 
 	app.ready.Store(true)
 
 	go func() {
 		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
-			log.Fatal(err)
+			logger.Error("serve failed", slog.String("error", err.Error()))
+			os.Exit(1)
 		}
 	}()
 
-	printBanner(os.Stdout, port)
+	if isTTY(os.Stdout) {
+		printBanner(os.Stdout)
+	}
+	logger.Info("listening", slog.String("port", port))
 
 	<-ctx.Done()
-	log.Println("shutdown: signal received")
+	logger.Info("shutdown", slog.String("phase", "signal_received"))
 	stop()
 
 	app.ready.Store(false)
-	log.Printf("shutdown: marked as not ready")
+	logger.Info("shutdown", slog.String("phase", "not_ready"))
 
 	if drainDelay > 0 {
-		log.Printf("shutdown: waiting %v for deregistration", drainDelay)
+		logger.Info("shutdown", slog.String("phase", "awaiting_deregistration"), slog.Duration("drain_delay", drainDelay))
 		time.Sleep(drainDelay)
 	}
 
-	log.Println("shutdown: draining in-flight requests")
+	logger.Info("shutdown", slog.String("phase", "draining"))
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("shutdown: drain incomplete with error: %v", err)
+		logger.Warn("shutdown", slog.String("phase", "drain_incomplete"), slog.String("error", err.Error()))
 	} else {
-		log.Println("shutdown: complete")
+		logger.Info("shutdown", slog.String("phase", "complete"))
 	}
 
 }
 
-func getEnvString(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
+func getLogLevel(lookup func(string) (string, bool)) (slog.Level, error) {
+	v, ok := lookup("CAVEO_LOG_LEVEL")
+	if !ok || v == "" {
+		return slog.LevelInfo, nil
 	}
-	return fallback
+	switch strings.ToLower(v) {
+	case "debug":
+		return slog.LevelDebug, nil
+	case "info":
+		return slog.LevelInfo, nil
+	case "warn", "warning":
+		return slog.LevelWarn, nil
+	case "error":
+		return slog.LevelError, nil
+	default:
+		return 0, fmt.Errorf("CAVEO_LOG_LEVEL must be one of: debug, info, warn, error; got: %q", v)
+	}
 }
 
 func getConcurrencyLimit(lookup func(string) (string, bool)) (int, error) {
@@ -120,7 +162,14 @@ func getDrainDelay(lookup func(string) (string, bool)) (time.Duration, error) {
 	return d, nil
 }
 
-func printBanner(w io.Writer, port string) {
+func getEnvString(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func printBanner(w io.Writer) {
 	_, _ = fmt.Fprintf(w, `
    ______                     
   / ____/___ __   _____  ____ 
@@ -136,6 +185,9 @@ func printBanner(w io.Writer, port string) {
    --- LIVE LOGS ---
 	
 `, "\033[32m", "\033[0m")
+}
 
-	log.Println("Caveo is listening at port: ", port)
+func isTTY(f *os.File) bool {
+	fi, err := f.Stat()
+	return err == nil && (fi.Mode()&os.ModeCharDevice) != 0
 }

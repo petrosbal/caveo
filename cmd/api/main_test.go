@@ -1,9 +1,44 @@
 package main
 
 import (
+	"log/slog"
 	"runtime"
 	"testing"
 )
+
+func TestGetLogLevel(t *testing.T) {
+	def := slog.LevelInfo
+	cases := []struct {
+		name    string
+		env     map[string]string
+		want    slog.Level
+		wantErr bool
+	}{
+		{"unset defaults", nil, def, false},
+		{"empty defaults", map[string]string{"CAVEO_LOG_LEVEL": ""}, def, false},
+		{"debug value", map[string]string{"CAVEO_LOG_LEVEL": "debug"}, slog.LevelDebug, false},
+		{"info value", map[string]string{"CAVEO_LOG_LEVEL": "info"}, slog.LevelInfo, false},
+		{"warn value", map[string]string{"CAVEO_LOG_LEVEL": "warn"}, slog.LevelWarn, false},
+		{"error value", map[string]string{"CAVEO_LOG_LEVEL": "error"}, slog.LevelError, false},
+		{"invalid value", map[string]string{"CAVEO_LOG_LEVEL": "invalid"}, def, true},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			lookup := func(k string) (string, bool) { v, ok := c.env[k]; return v, ok }
+			got, err := getLogLevel(lookup)
+			if c.wantErr && err == nil {
+				t.Fatalf("expected error, got nil (value: %s)", got)
+			}
+			if !c.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != c.want {
+				t.Errorf("expected %s, got %s", c.want, got)
+			}
+		})
+	}
+}
 
 func TestGetConcurrencyLimit(t *testing.T) {
 	def := runtime.GOMAXPROCS(0)

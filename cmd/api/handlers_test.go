@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
@@ -16,7 +18,8 @@ import (
 func newTestApp() *Application {
 	return &Application{
 		hasher:  hasher.NewService(),
-		limiter: NewLimiter(runtime.GOMAXPROCS(0)), // default limit for tests
+		limiter: NewLimiter(runtime.GOMAXPROCS(0)),
+		logger:  slog.New(slog.NewJSONHandler(io.Discard, nil)),
 	}
 }
 
@@ -182,6 +185,36 @@ func TestHandleVerify_BadRequest(t *testing.T) {
 
 			if res.StatusCode != http.StatusBadRequest {
 				t.Errorf("expected 400 Bad Request, got %d", res.StatusCode)
+			}
+		})
+	}
+}
+
+func TestPasswordNeverLogged(t *testing.T) {
+	var buf bytes.Buffer
+	app := newTestApp()
+	app.logger = slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
+
+	tests := []struct {
+		name     string
+		endpoint string
+		method   string
+		payload  []byte
+	}{
+		{name: "Hash", endpoint: "/hash", method: "POST", payload: []byte(`{"password": "SUPER_SECRET_PASSWORD"}`)},
+		{name: "Verify", endpoint: "/verify", method: "POST", payload: []byte(`{"password": "SUPER_SECRET_PASSWORD", "hash": "$argon2id$..."}`)},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(tc.method, tc.endpoint, strings.NewReader(string(tc.payload)))
+			app.Routes().ServeHTTP(rec, req)
+
+			if strings.Contains(buf.String(), "SUPER_SECRET_PASSWORD") {
+				t.Fatal("password leaked into logs")
 			}
 		})
 	}
