@@ -8,6 +8,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
+	"math"
 	"strings"
 
 	"golang.org/x/crypto/argon2"
@@ -103,21 +104,21 @@ func (s *Service) Verify(password, encodedHash string) (bool, error) {
 	parts := strings.Split(encodedHash, "$")
 
 	if len(parts) != 6 {
-		return false, fmt.Errorf("Invalid hash format")
+		return false, fmt.Errorf("invalid hash format")
 	}
 
 	//parts[1] - algorithm checking
 	if parts[1] != "argon2id" {
-		return false, fmt.Errorf("Unsupported algorithm: %s", parts[1])
+		return false, fmt.Errorf("unsupported algorithm: %s", parts[1])
 	}
 	//parts[2] - version checking
 	var version int
 	_, err := fmt.Sscanf(parts[2], "v=%d", &version)
 	if err != nil {
-		return false, fmt.Errorf("Incompatible version format")
+		return false, fmt.Errorf("incompatible version format")
 	}
 	if version != argon2.Version {
-		return false, fmt.Errorf("Unsupported argon2 version: %d", version)
+		return false, fmt.Errorf("unsupported argon2 version: %d", version)
 	}
 
 	//parts[3] - config params
@@ -126,21 +127,24 @@ func (s *Service) Verify(password, encodedHash string) (bool, error) {
 
 	n, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &memory, &iterations, &parallelism)
 	if err != nil || n != 3 {
-		return false, fmt.Errorf("Failed to parse parameters: %v", err)
+		return false, fmt.Errorf("failed to parse parameters: %v", err)
 	}
 
 	if memory > MaxMemory || iterations > MaxIterations || parallelism > MaxParallelism {
-		return false, fmt.Errorf("Hash parameters exceed maximum allowed values")
+		return false, fmt.Errorf("hash parameters exceed maximum allowed values")
 	}
 
 	//decode salt and hash (base64->raw bytes)
 	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
 	if err != nil {
-		return false, fmt.Errorf("Salt decode error: %v", err)
+		return false, fmt.Errorf("salt decode error: %v", err)
 	}
 	storedHash, err := base64.RawStdEncoding.DecodeString(parts[5])
 	if err != nil {
-		return false, fmt.Errorf("Hash decode error: %v", err)
+		return false, fmt.Errorf("hash decode error: %v", err)
+	}
+	if len(storedHash) > math.MaxUint32 {
+		return false, fmt.Errorf("stored hash length exceeds maximum representable key length")
 	}
 
 	//rehash password with parsed params
@@ -150,7 +154,7 @@ func (s *Service) Verify(password, encodedHash string) (bool, error) {
 		iterations,
 		memory,
 		parallelism,
-		uint32(len(storedHash)), //inferred keylength from data
+		uint32(len(storedHash)), //nolint:gosec // exact conversion: bounds-checked above, never truncates
 	)
 
 	return subtle.ConstantTimeCompare(storedHash, newHash) == 1, nil
