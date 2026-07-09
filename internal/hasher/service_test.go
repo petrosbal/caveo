@@ -42,6 +42,26 @@ func TestWorkflow(t *testing.T) {
 	}
 }
 
+// This hash was generated with golang.org/x/crypto v0.47.0 and must keep
+// verifying correctly regardless of which x/crypto version the module is
+// on later. The hash format is persistent data in consumers' databases;
+// this is what enforces that compatibility.
+func TestPinnedHash(t *testing.T) {
+	s := NewService()
+	const (
+		pinnedHash = "$argon2id$v=19$m=19456,t=2,p=1$yScNCPxKfF2BTmAD2q5uFA$hI3hVUeoEftGcC0X0NXGgYEHwrtnqzXdlxnZdb4qoSs"
+		password   = "pinned-hash-password" //nolint:gosec // test fixture, not a credential
+	)
+
+	match, err := s.Verify(password, pinnedHash)
+	if err != nil {
+		t.Fatalf("Verify failed with error: %v", err)
+	}
+	if !match {
+		t.Error("expected pinned hash to still verify, but it didn't")
+	}
+}
+
 func TestInvalidHashFormat(t *testing.T) {
 	s := NewService()
 
