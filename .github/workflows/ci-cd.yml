@@ -84,3 +84,15 @@ jobs:
           provenance: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  release:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - run: gh release create ${{ github.ref_name }} --generate-notes --draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
