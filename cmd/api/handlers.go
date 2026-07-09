@@ -109,11 +109,11 @@ func (app *Application) respondWithJSON(w http.ResponseWriter, status int, paylo
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"error":"Failed to encode response"}`))
+		_, _ = w.Write([]byte(`{"error":"Failed to encode response"}`))
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	w.Write(b)
+	_, _ = w.Write(b)
 }

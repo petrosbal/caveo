@@ -38,7 +38,7 @@ func TestHandleHash(t *testing.T) {
 
 	// assertions
 	res := w.Result()
-	defer res.Body.Close() // this happens last btw
+	defer func() { _ = res.Body.Close() }() // this happens last btw
 
 	// check status code
 	if res.StatusCode != http.StatusOK {
@@ -76,7 +76,7 @@ func TestHandleHash_BadRequest(t *testing.T) {
 			app.HandleHash(w, req)
 
 			res := w.Result()
-			defer res.Body.Close()
+			defer func() { _ = res.Body.Close() }()
 
 			if res.StatusCode != http.StatusBadRequest {
 				t.Errorf("expected 400 Bad Request, got %d", res.StatusCode)
@@ -140,7 +140,7 @@ func TestHandleVerify(t *testing.T) {
 			app.HandleVerify(w, req)
 
 			res := w.Result()
-			defer res.Body.Close()
+			defer func() { _ = res.Body.Close() }()
 
 			// decode
 			var response VerifyResponse
@@ -178,7 +178,7 @@ func TestHandleVerify_BadRequest(t *testing.T) {
 			app.HandleVerify(w, req)
 
 			res := w.Result()
-			defer res.Body.Close()
+			defer func() { _ = res.Body.Close() }()
 
 			if res.StatusCode != http.StatusBadRequest {
 				t.Errorf("expected 400 Bad Request, got %d", res.StatusCode)

@@ -121,7 +121,7 @@ func getDrainDelay(lookup func(string) (string, bool)) (time.Duration, error) {
 }
 
 func printBanner(w io.Writer, port string) {
-	fmt.Fprintf(w, `
+	_, _ = fmt.Fprintf(w, `
    ______                     
   / ____/___ __   _____  ____ 
  / /   / __ `+"`"+`/ | / / _ \/ __ \
