@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -38,7 +40,7 @@ func (app *Application) Routes() http.Handler {
 
 	r.Use(requestID)
 	r.Use(app.logRequests)
-	r.Use(middleware.Recoverer)
+	r.Use(app.recoverPanics)
 	r.Use(middleware.Timeout(60 * time.Second))
 
 	r.Use(func(next http.Handler) http.Handler {
@@ -88,6 +90,50 @@ func (app *Application) logRequests(next http.Handler) http.Handler {
 			slog.String("request_id", middleware.GetReqID(r.Context())),
 		)
 	})
+}
+
+func (app *Application) recoverPanics(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+
+		defer func() {
+			rec := recover()
+			if rec == nil {
+				return
+			}
+			if rec == http.ErrAbortHandler {
+				panic(rec)
+			}
+
+			stacktrace := truncate(string(debug.Stack()), 8192)
+			committed := ww.Status() != 0
+
+			app.logger.LogAttrs(r.Context(), slog.LevelError, "panic",
+				slog.String("method", r.Method),
+				slog.String("path", r.URL.Path),
+				slog.String("panic", fmt.Sprint(rec)),
+				slog.String("stack", stacktrace),
+				slog.String("request_id", middleware.GetReqID(r.Context())),
+				slog.Bool("response_committed", committed),
+			)
+
+			if committed {
+				panic(http.ErrAbortHandler)
+			} else {
+				app.respondWithError(ww, http.StatusInternalServerError, "Internal server error")
+			}
+		}()
+
+		next.ServeHTTP(ww, r)
+	})
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "...(truncated)"
 }
 
 func requestID(next http.Handler) http.Handler {
