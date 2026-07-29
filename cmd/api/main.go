@@ -18,13 +18,20 @@ import (
 	"github.com/petrosbal/caveo/internal/hasher"
 )
 
+type Config struct {
+	LogLevel              slog.Level
+	MaxConcurrentRequests int
+	DrainDelay            time.Duration
+	Port                  string
+}
+
 func main() {
 	hashService := hasher.NewService()
 
 	var levelVar slog.LevelVar
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: &levelVar,
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
 			if a.Value.Kind() == slog.KindDuration {
 				a.Value = slog.StringValue(a.Value.Duration().String())
 			}
@@ -32,50 +39,34 @@ func main() {
 		},
 	}))
 
-	level, err := getLogLevel(os.LookupEnv)
+	cfg, err := loadConfig(os.LookupEnv)
 	if err != nil {
 		logger.Error("config", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
-	levelVar.Set(level)
-
-	limit, err := getConcurrencyLimit(os.LookupEnv)
-	if err != nil {
-		logger.Error("config", slog.String("error", err.Error()))
-		os.Exit(1)
-	}
-	drainDelay, err := getDrainDelay(os.LookupEnv)
-	if err != nil {
-		logger.Error("config", slog.String("error", err.Error()))
-		os.Exit(1)
-	}
-	port := getEnvString("PORT", "8080")
+	levelVar.Set(cfg.LogLevel)
 
 	app := &Application{
 		hasher:  hashService,
-		limiter: NewLimiter(limit),
+		limiter: NewLimiter(cfg.MaxConcurrentRequests),
 		logger:  logger,
 	}
+
 	logger.Info("config",
-		slog.String("log_level", level.String()),
-		slog.Int("max_concurrent_requests", limit),
-		slog.Duration("drain_delay", drainDelay),
-		slog.String("port", port),
+		slog.String("log_level", cfg.LogLevel.String()),
+		slog.Int("max_concurrent_requests", cfg.MaxConcurrentRequests),
+		slog.Duration("drain_delay", cfg.DrainDelay),
+		slog.String("port", cfg.Port),
 	)
 
-	srv := &http.Server{
-		Addr:         ":" + port,
-		Handler:      app.Routes(),
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 10 * time.Second,
-	}
+	srv := newServer(cfg.Port, app.Routes())
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	ln, err := net.Listen("tcp", srv.Addr)
 	if err != nil {
-		logger.Error("listen failed", slog.String("port", port), slog.String("error", err.Error()))
+		logger.Error("listen failed", slog.String("port", cfg.Port), slog.String("error", err.Error()))
 		os.Exit(1)
 	}
 
@@ -91,29 +82,37 @@ func main() {
 	if isTTY(os.Stdout) {
 		printBanner(os.Stdout)
 	}
-	logger.Info("listening", slog.String("port", port))
+	logger.Info("listening", slog.String("port", cfg.Port))
 
 	<-ctx.Done()
 	logger.Info("shutdown", slog.String("phase", "signal_received"))
 	stop()
+	gracefulShutdown(srv, app, cfg.DrainDelay, logger)
 
-	app.ready.Store(false)
-	logger.Info("shutdown", slog.String("phase", "not_ready"))
+}
 
-	if drainDelay > 0 {
-		logger.Info("shutdown", slog.String("phase", "awaiting_deregistration"), slog.Duration("drain_delay", drainDelay))
-		time.Sleep(drainDelay)
+func loadConfig(lookup func(string) (string, bool)) (Config, error) {
+	level, err := getLogLevel(lookup)
+	if err != nil {
+		return Config{}, err
 	}
 
-	logger.Info("shutdown", slog.String("phase", "draining"))
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		logger.Warn("shutdown", slog.String("phase", "drain_incomplete"), slog.String("error", err.Error()))
-	} else {
-		logger.Info("shutdown", slog.String("phase", "complete"))
+	limit, err := getConcurrencyLimit(lookup)
+	if err != nil {
+		return Config{}, err
 	}
+	drainDelay, err := getDrainDelay(lookup)
+	if err != nil {
+		return Config{}, err
+	}
+	port := getPort(lookup)
 
+	return Config{
+		LogLevel:              level,
+		MaxConcurrentRequests: limit,
+		DrainDelay:            drainDelay,
+		Port:                  port,
+	}, nil
 }
 
 func getLogLevel(lookup func(string) (string, bool)) (slog.Level, error) {
@@ -162,11 +161,21 @@ func getDrainDelay(lookup func(string) (string, bool)) (time.Duration, error) {
 	return d, nil
 }
 
-func getEnvString(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
+func getPort(lookup func(string) (string, bool)) string {
+	v, ok := lookup("PORT")
+	if !ok || v == "" {
+		return "8080"
 	}
-	return fallback
+	return v
+}
+
+func newServer(port string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:         ":" + port,
+		Handler:      handler,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+	}
 }
 
 func printBanner(w io.Writer) {
@@ -190,4 +199,24 @@ func printBanner(w io.Writer) {
 func isTTY(f *os.File) bool {
 	fi, err := f.Stat()
 	return err == nil && (fi.Mode()&os.ModeCharDevice) != 0
+}
+
+func gracefulShutdown(srv *http.Server, app *Application, drainDelay time.Duration, logger *slog.Logger) {
+
+	app.ready.Store(false)
+	logger.Info("shutdown", slog.String("phase", "not_ready"))
+
+	if drainDelay > 0 {
+		logger.Info("shutdown", slog.String("phase", "awaiting_deregistration"), slog.Duration("drain_delay", drainDelay))
+		time.Sleep(drainDelay)
+	}
+
+	logger.Info("shutdown", slog.String("phase", "draining"))
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		logger.Warn("shutdown", slog.String("phase", "drain_incomplete"), slog.String("error", err.Error()))
+	} else {
+		logger.Info("shutdown", slog.String("phase", "complete"))
+	}
 }

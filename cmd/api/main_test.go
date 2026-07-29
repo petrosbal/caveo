@@ -4,7 +4,65 @@ import (
 	"log/slog"
 	"runtime"
 	"testing"
+	"time"
 )
+
+func TestLoadConfig(t *testing.T) {
+	cases := []struct {
+		name    string
+		env     map[string]string
+		want    Config
+		wantErr bool
+	}{
+		{"unset defaults",
+			nil,
+			Config{
+				LogLevel:              slog.LevelInfo,
+				MaxConcurrentRequests: runtime.GOMAXPROCS(0),
+				DrainDelay:            5 * time.Second,
+				Port:                  "8080"},
+			false,
+		},
+		{"all set",
+			map[string]string{
+				"CAVEO_LOG_LEVEL":               "debug",
+				"CAVEO_MAX_CONCURRENT_REQUESTS": "4",
+				"CAVEO_DRAIN_DELAY":             "10s",
+				"PORT":                          "8081"},
+			Config{
+				LogLevel:              slog.LevelDebug,
+				MaxConcurrentRequests: 4,
+				DrainDelay:            10 * time.Second,
+				Port:                  "8081"},
+			false,
+		},
+		{"error propagates",
+			map[string]string{
+				"CAVEO_LOG_LEVEL":               "whatever",
+				"CAVEO_MAX_CONCURRENT_REQUESTS": "4",
+				"CAVEO_DRAIN_DELAY":             "10s",
+				"PORT":                          "8081"},
+			Config{},
+			true,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			lookup := func(k string) (string, bool) { v, ok := c.env[k]; return v, ok }
+			got, err := loadConfig(lookup)
+			if c.wantErr && err == nil {
+				t.Fatalf("expected error, got nil (value: %v)", got)
+			}
+			if !c.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != c.want {
+				t.Errorf("expected %v, got %v", c.want, got)
+			}
+		})
+	}
+}
 
 func TestGetLogLevel(t *testing.T) {
 	def := slog.LevelInfo
@@ -104,6 +162,29 @@ func TestGetDrainDelay(t *testing.T) {
 			}
 			if got.Seconds() != float64(c.want) {
 				t.Errorf("expected %f seconds, got %v seconds", c.want, got.Seconds())
+			}
+		})
+	}
+}
+
+func TestGetPort(t *testing.T) {
+	cases := []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{"unset defaults", nil, "8080"},
+		{"empty defaults", map[string]string{"PORT": ""}, "8080"},
+		{"valid value", map[string]string{"PORT": "8081"}, "8081"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			lookup := func(k string) (string, bool) { v, ok := c.env[k]; return v, ok }
+			got := getPort(lookup)
+
+			if got != c.want {
+				t.Errorf("expected %s, got %s", c.want, got)
 			}
 		})
 	}
