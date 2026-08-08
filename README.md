@@ -57,17 +57,22 @@ Environment variables. Invalid values fail fast at startup.
 Requires Go 1.25+ and [`gotestsum`](https://github.com/gotestyourself/gotestsum) (`go install gotest.tools/gotestsum@latest`).
 
 ```
-make run      # serve on :8080
-make test     # unit + integration
-make build    # -> bin/caveo
+make run           # build, then serve on :8080
+make test          # unit + integration
+make build         # -> bin/caveo
+make docker-build  # test, then build the image
+make docker-run    # build the image, then run it on :8080
 make clean
 ```
+
+The version is stamped in at link time (`-X main.version`, `git describe`) and reported
+in the `starting` log line and the banner. Unstamped builds report `dev`.
 
 ## Docker
 
 Multi-stage build into `gcr.io/distroless/static-debian12:nonroot`, non-root (UID 65532), static binary with symbols stripped.
 
 ```
-docker build -t caveo .
-docker run -p 8080:8080 caveo
+make docker-build
+make docker-run
 ```

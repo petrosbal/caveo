@@ -1,12 +1,13 @@
 # builder stage
 FROM golang:1.25-alpine AS builder
+ARG VERSION=dev
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 
-# CGO_ENABLED=0 for static binary, -ldflags to strip debug info & symbols
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o caveo ./cmd/api
+# CGO_ENABLED=0 for static binary, -ldflags to strip debug info & symbols and overwrite version
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X main.version=${VERSION}" -o caveo ./cmd/api
 
 
 

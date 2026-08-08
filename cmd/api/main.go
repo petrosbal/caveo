@@ -25,6 +25,8 @@ type Config struct {
 	Port                  string
 }
 
+var version = "dev"
+
 func main() {
 	hashService := hasher.NewService()
 
@@ -38,6 +40,8 @@ func main() {
 			return a
 		},
 	}))
+
+	logger.Info("starting", slog.String("version", version))
 
 	cfg, err := loadConfig(os.LookupEnv)
 	if err != nil {
@@ -152,11 +156,11 @@ func getDrainDelay(lookup func(string) (string, bool)) (time.Duration, error) {
 		return 5 * time.Second, nil
 	}
 	d, err := time.ParseDuration(v)
-	if d < 0 {
-		return 0, fmt.Errorf("CAVEO_DRAIN_DELAY must be a non-negative duration, got: %q", v)
-	}
 	if err != nil {
 		return 0, fmt.Errorf("CAVEO_DRAIN_DELAY must be a valid duration, got: %q", v)
+	}
+	if d < 0 {
+		return 0, fmt.Errorf("CAVEO_DRAIN_DELAY must be a non-negative duration, got: %q", v)
 	}
 	return d, nil
 }
@@ -184,7 +188,7 @@ func printBanner(w io.Writer) {
   / ____/___ __   _____  ____ 
  / /   / __ `+"`"+`/ | / / _ \/ __ \
 / /___/ /_/ /| |/ /  __/ /_/ /
-\____/\__,_/ |___/\___/\____/ v1.0
+\____/\__,_/ |___/\___/\____/ %s
                               
    Argon2id Microservice
    ---------------------
@@ -193,7 +197,7 @@ func printBanner(w io.Writer) {
 
    --- LIVE LOGS ---
 	
-`, "\033[32m", "\033[0m")
+`, version, "\033[32m", "\033[0m")
 }
 
 func isTTY(f *os.File) bool {
