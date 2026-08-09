@@ -72,7 +72,7 @@ func TestInvalidHashFormat(t *testing.T) {
 	}
 }
 
-func TestVerifyRejectsOversizedParams(t *testing.T) {
+func TestVerifyRejectsOutOfRangeParams(t *testing.T) {
 	s := NewService()
 
 	valid, _ := s.Hash("pw")
@@ -84,6 +84,9 @@ func TestVerifyRejectsOversizedParams(t *testing.T) {
 		{"memory over max", fmt.Sprintf("m=%d", TargetMemory), fmt.Sprintf("m=%d", MaxMemory+1)},
 		{"iterations over max", fmt.Sprintf("t=%d", TargetIterations), fmt.Sprintf("t=%d", MaxIterations+1)},
 		{"parallelism over max", fmt.Sprintf("p=%d", TargetParallelism), fmt.Sprintf("p=%d", MaxParallelism+1)},
+		{"zero memory", fmt.Sprintf("m=%d", TargetMemory), "m=0"},
+		{"zero iterations", fmt.Sprintf("t=%d", TargetIterations), "t=0"},
+		{"zero parallelism", fmt.Sprintf("p=%d", TargetParallelism), "p=0"},
 	}
 
 	for _, c := range cases {

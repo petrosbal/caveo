@@ -130,8 +130,10 @@ func (s *Service) Verify(password, encodedHash string) (bool, error) {
 		return false, fmt.Errorf("failed to parse parameters: %v", err)
 	}
 
-	if memory > MaxMemory || iterations > MaxIterations || parallelism > MaxParallelism {
-		return false, fmt.Errorf("hash parameters exceed maximum allowed values")
+	if memory < 1 || memory > MaxMemory ||
+		iterations < 1 || iterations > MaxIterations ||
+		parallelism < 1 || parallelism > MaxParallelism {
+		return false, fmt.Errorf("hash parameters out of range")
 	}
 
 	//decode salt and hash (base64->raw bytes)
