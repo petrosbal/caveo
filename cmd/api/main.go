@@ -206,7 +206,6 @@ func isTTY(f *os.File) bool {
 }
 
 func gracefulShutdown(srv *http.Server, app *Application, drainDelay time.Duration, logger *slog.Logger) {
-
 	app.ready.Store(false)
 	logger.Info("shutdown", slog.String("phase", "not_ready"))
 

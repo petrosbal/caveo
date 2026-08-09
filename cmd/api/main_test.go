@@ -1,8 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"log/slog"
+	"net"
+	"net/http"
 	"runtime"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -188,4 +194,114 @@ func TestGetPort(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGracefulShutdown(t *testing.T) {
+	app := newTestApp()
+	app.ready.Store(true)
+
+	var buf bytes.Buffer
+	app.logger = slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	started := make(chan struct{})
+	srv := newServer("", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		time.Sleep(200 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	go func() { _ = srv.Serve(ln) }()
+
+	result := make(chan *http.Response, 1)
+	go func() {
+		resp, err := http.Get("http://" + ln.Addr().String())
+		if err != nil {
+			result <- nil
+			return
+		}
+		result <- resp
+	}()
+
+	<-started
+
+	gracefulShutdown(srv, app, 0, app.logger)
+
+	resp := <-result
+	if resp == nil {
+		t.Fatal("request failed, drain cut it off")
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("want status %d, got %d", http.StatusOK, resp.StatusCode)
+	}
+	if app.ready.Load() {
+		t.Errorf("want ready to be false, got true")
+	}
+
+	phases := logPhases(t, &buf)
+
+	want := []string{"not_ready", "draining", "complete"}
+	if !slices.Equal(phases, want) {
+		t.Errorf("want phases %v, got %v", want, phases)
+	}
+}
+
+func TestGracefulShutdownDrainDelay(t *testing.T) {
+	app := newTestApp()
+	app.ready.Store(true)
+
+	var buf bytes.Buffer
+	app.logger = slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+
+	srv := newServer("", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	go func() { _ = srv.Serve(ln) }()
+
+	start := time.Now()
+	gracefulShutdown(srv, app, 100*time.Millisecond, app.logger)
+
+	if time.Since(start) < 100*time.Millisecond {
+		t.Errorf("want drain delay to be at least 100ms, got %v", time.Since(start))
+	}
+
+	phases := logPhases(t, &buf)
+
+	want := []string{"not_ready", "awaiting_deregistration", "draining", "complete"}
+	if !slices.Equal(phases, want) {
+		t.Errorf("want phases %v, got %v", want, phases)
+	}
+}
+
+func logPhases(t *testing.T, buf *bytes.Buffer) []string {
+	t.Helper()
+	var phases []string
+	for _, line := range strings.Split(buf.String(), "\n") {
+		if line == "" {
+			continue
+		}
+		var got map[string]any
+		if err := json.Unmarshal([]byte(line), &got); err != nil {
+			t.Fatalf("failed to decode log: %v (log: %s)", err, buf.String())
+		}
+		phase, ok := got["phase"].(string)
+		if !ok {
+			t.Fatalf("log line has no phase: %s", line)
+		}
+		phases = append(phases, phase)
+	}
+	return phases
 }
