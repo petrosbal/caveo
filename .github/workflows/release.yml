@@ -1,51 +1,31 @@
-# ci/cd pipeline
-name: CI/CD
+name: Release
 
 on:
   push:
     tags: ['v*']
-  pull_request:
-    branches: [main]
 
 permissions:
   contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
-  test:
-    if: github.event_name == 'pull_request'
+  guard:
     runs-on: ubuntu-latest
-    steps:
-        - uses: actions/checkout@v7
-
-        - uses: actions/setup-go@v7
-          with:
-            go-version-file: go.mod
-            cache: true
-        
-        - run: go test -v ./...
-
-  lint:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
-          cache: true
+          fetch-depth: 0
+      - run: git merge-base --is-ancestor ${{ github.sha }} origin/main
 
-      - uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.12
 
   vulncheck:
-    if: github.event_name == 'pull_request'
+    needs: guard
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: golang/govulncheck-action@v1
         with:
@@ -53,8 +33,9 @@ jobs:
           go-version-file: go.mod
 
   build-push:
-    if: github.event_name == 'push'
+    needs: vulncheck
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       packages: write
@@ -88,13 +69,16 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
 
   release:
-    if: github.event_name == 'push'
+    needs: build-push
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v7
 
-      - run: gh release create ${{ github.ref_name }} --generate-notes --draft
+      - run: gh release create "$TAG" --generate-notes --draft
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+

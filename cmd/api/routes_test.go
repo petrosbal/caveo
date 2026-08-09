@@ -221,8 +221,9 @@ func TestPanicAfterResponseStartedAbortsConnection(t *testing.T) {
 		t.Errorf("want body read to fail on aborted connection, got clean read")
 	}
 
-	var got map[string]any
+	srv.Close()
 
+	var got map[string]any
 	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
 		t.Fatalf("failed to decode log: %v (log: %s)", err, buf.String())
 	}
