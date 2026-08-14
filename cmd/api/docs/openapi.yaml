@@ -6,7 +6,7 @@ info:
     CPU/memory-intensive hashing off application servers. There is no database or
     persistence: the encoded hash string is self-describing and carries its own
     parameters, so Verify reads them back out of the hash rather than from config.
-  version: 1.0.0
+  version: 0.1.0
 servers:
   - url: http://localhost:8080
     description: Local instance (PORT env var, default 8080)
@@ -44,16 +44,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/AtCapacity'
   /verify:
     post:
       operationId: verifyPassword
       summary: Verify a password against an encoded hash
       description: >-
         Parses the Argon2id parameters out of the supplied encoded hash and does a
-        constant-time comparison. Rejects hashes whose m/t/p exceed the service
-        bounds (m<=262144, t<=32, p<=16) before hashing, so a crafted hash cannot
-        force a huge allocation. A wrong password returns 200 with match=false; a
-        malformed or oversized hash returns 400.
+        constant-time comparison. Rejects hashes whose m/t/p fall outside the service
+        bounds (1<=m<=262144, 1<=t<=32, 1<=p<=16) before hashing: the ceiling stops a
+        crafted hash forcing a huge allocation, and the floor stops values argon2
+        rejects itself. A wrong password returns 200 with match=false; a malformed or
+        out-of-range hash returns 400.
       requestBody:
         required: true
         content:
@@ -73,7 +76,60 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/AtCapacity'
+  /healthz:
+    get:
+      operationId: healthz
+      summary: Liveness probe
+      description: >-
+        Returns 200 while the process is running. Not gated by the concurrency limiter,
+        and does not flip during shutdown: a draining pod is stopping on purpose, so a
+        restart would not fix it.
+      responses:
+        '200':
+          description: Process is alive.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+  /readyz:
+    get:
+      operationId: readyz
+      summary: Readiness probe
+      description: >-
+        Returns 200 while serving and 503 once shutdown begins, so a load balancer
+        deregisters the pod before the server stops accepting requests. Deliberately
+        NOT gated on saturation: that is a fleet-correlated signal and would pull pods
+        out of rotation in lockstep.
+      responses:
+        '200':
+          description: Serving.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+        '503':
+          description: Draining; do not send new traffic.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
+  responses:
+    AtCapacity:
+      description: >-
+        All Argon2 slots are busy. The service sheds rather than queues, and sets
+        Retry-After: 1. The concurrency limit defaults to GOMAXPROCS.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds to wait before retrying.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
   schemas:
     HashRequest:
       type: object
@@ -82,7 +138,7 @@ components:
         password:
           type: string
           description: Plaintext password to hash.
-          example: correct horse battery staple
+          example: Password123!
     HashResponse:
       type: object
       required: [hash]
@@ -98,7 +154,7 @@ components:
         password:
           type: string
           description: Plaintext password to check.
-          example: correct horse battery staple
+          example: Password123!
         hash:
           type: string
           description: Previously produced PHC-encoded Argon2id hash.
@@ -119,3 +175,11 @@ components:
           type: string
           description: Human-readable error message.
           example: Password is required
+    StatusResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          description: Probe result.
+          example: healthy

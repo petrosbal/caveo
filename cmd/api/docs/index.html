@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Caveo - API Documentation</title>
+
+  <style>
+    :root {
+      color-scheme: light dark;
+      --line: color-mix(in srgb, CanvasText 20%, transparent);
+      --fill: color-mix(in srgb, CanvasText 8%, transparent);
+    }
+
+    body {
+      font: 15px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      max-width: 44rem;
+      margin: 0 auto;
+      padding: 2rem 1rem;
+      background: Canvas;
+      color: CanvasText;
+    }
+
+    h1 { margin-bottom: 0 }
+    h2 { margin-top: 2.5rem; border-bottom: 1px solid var(--line) }
+    h3 { font-size: .95rem; margin: .75rem 0 0 }
+
+    code, pre { font-size: .9em }
+    pre { background: var(--fill); padding: .75rem; overflow-x: auto }
+    .warn { background: color-mix(in srgb, #f5a623 22%, transparent); padding: .6rem .8rem }
+
+    /* try-it forms, hidden until the script adds .js, because they need fetch to work anyway */
+    form { display: none; gap: .5rem; margin: 1rem 0 }
+    body.js form { display: grid; grid-template-columns: minmax(0, 1fr) }
+
+    input, button { font: inherit; padding: .45rem .6rem }
+    input { box-sizing: border-box; min-width: 0 }
+    button { width: fit-content; cursor: pointer }
+
+    /* response fields. minmax(0,...) in both grids, without it a long hash widens the
+       column and drags the inputs with it.*/
+    .field {
+      display: grid;
+      grid-template-columns: 4.5rem minmax(0, 1fr);
+      align-items: baseline;
+    }
+
+    .field-label { font-size: .8em; opacity: .6 }
+
+    output {
+      display: block;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      min-height: 1.4em;
+    }
+
+    table { border-collapse: collapse; width: 100% }
+    th, td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid var(--line) }
+    footer { margin-top: 3rem; padding-top: 1rem; text-align: center; border-top: 1px solid var(--line) }
+  </style>
+</head>
+
+<body>
+
+  <header>
+    <h1>Caveo</h1>
+    <p>Stateless Argon2id password hashing and verification. Version {{VERSION}}.</p>
+
+    <p>
+      OpenAPI spec: <a href="/docs/openapi.yaml">/docs/openapi.yaml</a>.
+      All responses are JSON, including errors.
+    </p>
+
+    <p class="warn">
+      The forms below post to this running instance. Use throwaway values instead of real
+      passwords.
+    </p>
+  </header>
+
+  <section id="hash">
+    <h2>POST /hash</h2>
+
+    <p>
+      Generates a fresh random salt and returns a string of the form
+      <code>$argon2id$v=19$m=19456,t=2,p=1$salt$hash</code>. Store that whole string. It
+      contains the salt and the cost parameters, so no other columns are needed.
+    </p>
+
+    <pre>curl -s localhost:8080/hash \
+  -H 'Content-Type: application/json' \
+  -d '{"password":"Password123!"}'</pre>
+
+    <form id="hash-form">
+      <input id="hash-password" placeholder="password" value="Password123!">
+      <button type="submit">Send</button>
+
+      <h3>Response</h3>
+
+      <div class="field">
+        <span class="field-label">Status</span>
+        <output id="hash-status"></output>
+      </div>
+
+      <div class="field">
+        <span class="field-label">Body</span>
+        <output id="hash-body"></output>
+      </div>
+    </form>
+  </section>
+
+  <section id="verify">
+    <h2>POST /verify</h2>
+
+    <p>
+      Parses the parameters out of the supplied hash and compares in constant time. A
+      wrong password is <code>200</code> with <code>{"match": false}</code>. A malformed
+      or out-of-range hash is <code>400</code>.
+    </p>
+
+    <pre>curl -s localhost:8080/verify \
+  -H 'Content-Type: application/json' \
+  -d '{"password":"Password123!","hash":"$argon2id$v=19$..."}'</pre>
+
+    <form id="verify-form">
+      <input id="verify-password" placeholder="password" value="Password123!">
+      <input id="verify-hash" placeholder="hash (filled in by /hash above)">
+      <button type="submit">Send</button>
+
+      <h3>Response</h3>
+
+      <div class="field">
+        <span class="field-label">Status</span>
+        <output id="verify-status"></output>
+      </div>
+
+      <div class="field">
+        <span class="field-label">Body</span>
+        <output id="verify-body"></output>
+      </div>
+    </form>
+  </section>
+
+  <section id="responses">
+    <h2>Responses</h2>
+
+    <table>
+      <tr>
+        <th>Status</th>
+        <th>When</th>
+      </tr>
+      <tr>
+        <td>200</td>
+        <td>Hash created, or comparison completed (see <code>match</code>).</td>
+      </tr>
+      <tr>
+        <td>400</td>
+        <td>Body is not valid JSON, a field is missing, or the hash is malformed.</td>
+      </tr>
+      <tr>
+        <td>404</td>
+        <td>Unknown path.</td>
+      </tr>
+      <tr>
+        <td>405</td>
+        <td>Wrong method for a known path. <code>Allow</code> lists what it accepts.</td>
+      </tr>
+      <tr>
+        <td>500</td>
+        <td>Unexpected server error.</td>
+      </tr>
+      <tr>
+        <td>503</td>
+        <td>All Argon2 slots are busy. The response sets <code>Retry-After: 1</code>.</td>
+      </tr>
+    </table>
+  </section>
+
+  <section id="operational">
+    <h2>Operational endpoints</h2>
+
+    <p>
+      <code>GET /healthz</code> returns <code>200</code> while the process is running.
+      <code>GET /readyz</code> returns <code>200</code> while serving and <code>503</code>
+      once shutdown begins, so a load balancer can take it out of rotation before the
+      server stops accepting requests.
+    </p>
+  </section>
+
+  <footer>
+    <a href="https://github.com/petrosbal/caveo">github.com/petrosbal/caveo</a> &middot; GPL-3.0
+  </footer>
+
+  <script>
+    document.body.classList.add("js");
+
+    // "prefix" resolves the two <output> ids: "<prefix>-status" and "<prefix>-body".
+    async function send(path, body, prefix) {
+      const statusOut = document.getElementById(prefix + "-status");
+      const bodyOut = document.getElementById(prefix + "-body");
+
+      statusOut.textContent = "sending...";
+      bodyOut.textContent = "";
+
+      try {
+        const res = await fetch(path, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(body),
+        });
+
+        const text = await res.text();
+        statusOut.textContent = res.status + " " + res.statusText;
+        bodyOut.textContent = text;
+        return {status: res.status, text};
+      } catch (err) {
+        statusOut.textContent = "request failed";
+        bodyOut.textContent = String(err);
+        return null;
+      }
+    }
+
+    document.getElementById("hash-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      const result = await send(
+        "/hash",
+        {password: document.getElementById("hash-password").value},
+        "hash",
+      );
+
+      // convenience only: feed the new hash into the verify form below.
+      if (result && result.status === 200) {
+        try {
+          document.getElementById("verify-hash").value = JSON.parse(result.text).hash;
+        } catch { /* autofill is optional */ }
+      }
+    });
+
+    document.getElementById("verify-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+
+      send(
+        "/verify",
+        {
+          password: document.getElementById("verify-password").value,
+          hash: document.getElementById("verify-hash").value,
+        },
+        "verify",
+      );
+    });
+  </script>
+
+</body>
+
+</html>

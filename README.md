@@ -25,7 +25,7 @@ Stateless Argon2id password hashing and verification service, in Go. Offloads CP
 
 ## API
 
-Two endpoints. Full spec at `GET /docs` (RapiDoc) or `GET /docs/openapi.yaml`.
+Two endpoints. Browsable docs at `GET /docs`, machine-readable spec at `GET /docs/openapi.yaml`.
 
 `POST /hash`
 ```json

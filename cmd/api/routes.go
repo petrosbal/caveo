@@ -17,24 +17,28 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-func (app *Application) Routes() http.Handler {
+type route struct {
+	method  string
+	pattern string
+	handler http.HandlerFunc
+	heavy   bool
+}
 
-	type route struct {
-		method  string
-		pattern string
-		handler http.HandlerFunc
-		heavy   bool
-	}
-
-	routes := []route{
+// the routes are the source of truth for what this service exposes. the OpenAPI spec
+// and the docs page must agree with this table; TestDocsMatchRoutes enforces that.
+func (app *Application) routeTable() []route {
+	return []route{
 		{"POST", "/hash", app.HandleHash, true},
 		{"POST", "/verify", app.HandleVerify, true},
 		{"GET", "/healthz", app.HandleHealthz, false},
 		{"GET", "/readyz", app.HandleReadyz, false},
 		{"GET", "/docs", app.handleDocs, false},
 		{"GET", "/docs/openapi.yaml", app.handleOpenAPISpec, false},
-		{"GET", "/docs/rapidoc-min.js", app.handleRapiDocAsset, false},
 	}
+}
+
+func (app *Application) Routes() http.Handler {
+	routes := app.routeTable()
 
 	r := chi.NewRouter()
 
