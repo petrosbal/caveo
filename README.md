@@ -2,7 +2,7 @@
 
 Stateless Argon2id password hashing and verification service, in Go. Offloads CPU- and memory-intensive hashing off your application servers. No database, no persistence: each hash is a self-describing `$argon2id$v=19$m=...$salt$hash` string that carries its own parameters, so `verify` reads them back out of the hash rather than from config.
 
-- Go 1.25+, `golang.org/x/crypto/argon2`
+- Go 1.26+, `golang.org/x/crypto/argon2`
 - Ships as a distroless, non-root, static image
 
 ## Structure
@@ -54,7 +54,7 @@ Environment variables. Invalid values fail fast at startup.
 
 ## Development
 
-Requires Go 1.25+ and [`gotestsum`](https://github.com/gotestyourself/gotestsum) (`go install gotest.tools/gotestsum@latest`).
+Requires Go 1.26+ and [`gotestsum`](https://github.com/gotestyourself/gotestsum) (`go install gotest.tools/gotestsum@latest`).
 
 ```
 make run           # build, then serve on :8080
