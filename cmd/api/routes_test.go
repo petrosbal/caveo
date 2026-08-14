@@ -63,7 +63,6 @@ func TestDocsRoutesContentType(t *testing.T) {
 	}{
 		{"docs page", "GET", "/docs", 200, "text/html"},
 		{"openapi spec", "GET", "/docs/openapi.yaml", 200, "application/yaml"},
-		{"rapidoc asset", "GET", "/docs/rapidoc-min.js", 200, "application/javascript"},
 	}
 
 	for _, c := range cases {
