@@ -1,6 +1,7 @@
 package hasher
 
 import (
+	"encoding/base64"
 	"fmt"
 	"strings"
 	"testing"
@@ -95,6 +96,39 @@ func TestVerifyRejectsOutOfRangeParams(t *testing.T) {
 			_, err := s.Verify("pw", evil)
 			if err == nil {
 				t.Errorf("Expected error for %s, got nil", c.name)
+			}
+		})
+	}
+}
+
+func TestVerifyRejectsUndersizedSaltAndHash(t *testing.T) {
+	s := NewService()
+	valid, _ := s.Hash("pw")
+
+	replacePart := func(idx int, value string) string {
+		parts := strings.Split(valid, "$")
+		parts[idx] = value
+		return strings.Join(parts, "$")
+	}
+
+	b64 := func(n int) string {
+		return base64.RawStdEncoding.EncodeToString(make([]byte, n))
+	}
+
+	cases := []struct {
+		name string
+		evil string
+	}{
+		{"empty salt", replacePart(4, "")},
+		{"empty hash", replacePart(5, "")},
+		{"salt one byte under min", replacePart(4, b64(MinSaltLength-1))},
+		{"hash one byte under min", replacePart(5, b64(MinKeyLength-1))},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if _, err := s.Verify("pw", c.evil); err == nil {
+				t.Errorf("want error for %s, got nil", c.name)
 			}
 		})
 	}

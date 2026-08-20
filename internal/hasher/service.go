@@ -17,7 +17,7 @@ import (
 // OWASP-recommended defaults
 // https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html
 const (
-	TargetMemory      = 19 * 1024 //19MB
+	TargetMemory      = 19 * 1024 //19MiB (argon2 memory is in KiB)
 	TargetIterations  = 2
 	TargetParallelism = 1
 	TargetSaltLength  = 16
@@ -25,9 +25,11 @@ const (
 )
 
 const (
-	MaxMemory      = 256 * 1024 //256MB
+	MaxMemory      = 256 * 1024 //256MiB
 	MaxIterations  = 32
 	MaxParallelism = 16
+	MinSaltLength  = 8 //RFC 9106
+	MinKeyLength   = 4 //RFC 9106
 )
 
 // holds the argon2 params
@@ -144,6 +146,14 @@ func (s *Service) Verify(password, encodedHash string) (bool, error) {
 	storedHash, err := base64.RawStdEncoding.DecodeString(parts[5])
 	if err != nil {
 		return false, fmt.Errorf("hash decode error: %v", err)
+	}
+
+	if len(salt) < MinSaltLength {
+		return false, fmt.Errorf("salt too short: %d bytes", len(salt))
+	}
+
+	if len(storedHash) < MinKeyLength {
+		return false, fmt.Errorf("hash too short: %d bytes", len(storedHash))
 	}
 	if len(storedHash) > math.MaxUint32 {
 		return false, fmt.Errorf("stored hash length exceeds maximum representable key length")
