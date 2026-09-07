@@ -100,25 +100,55 @@ func (s *Service) Hash(password string) (string, error) {
 // it parses the params directly from it
 func (s *Service) Verify(password, encodedHash string) (bool, error) {
 
+	p, err := parseHash(encodedHash)
+	if err != nil {
+		return false, err
+	}
+
+	//rehash password with parsed params
+	newHash := argon2.IDKey(
+		[]byte(password),
+		p.salt,
+		p.iterations,
+		p.memory,
+		p.parallelism,
+		uint32(len(p.key)), //nolint:gosec // exact conversion: bounds-checked in parseHash, never truncates
+	)
+
+	return subtle.ConstantTimeCompare(p.key, newHash) == 1, nil
+}
+
+type parsedHash struct {
+	memory      uint32
+	iterations  uint32
+	parallelism uint8
+	salt        []byte
+	key         []byte
+}
+
+// parses and validates an encoded hash
+// on success the params are guaranteed to be safe for argon2.IDKey
+func parseHash(encodedHash string) (parsedHash, error) {
+
 	//split the hash to extract components
 	parts := strings.Split(encodedHash, "$")
 
 	if len(parts) != 6 {
-		return false, fmt.Errorf("invalid hash format")
+		return parsedHash{}, fmt.Errorf("invalid hash format")
 	}
 
 	//parts[1] - algorithm checking
 	if parts[1] != "argon2id" {
-		return false, fmt.Errorf("unsupported algorithm: %s", parts[1])
+		return parsedHash{}, fmt.Errorf("unsupported algorithm: %s", parts[1])
 	}
 	//parts[2] - version checking
 	var version int
 	_, err := fmt.Sscanf(parts[2], "v=%d", &version)
 	if err != nil {
-		return false, fmt.Errorf("incompatible version format")
+		return parsedHash{}, fmt.Errorf("incompatible version format")
 	}
 	if version != argon2.Version {
-		return false, fmt.Errorf("unsupported argon2 version: %d", version)
+		return parsedHash{}, fmt.Errorf("unsupported argon2 version: %d", version)
 	}
 
 	//parts[3] - config params
@@ -127,45 +157,42 @@ func (s *Service) Verify(password, encodedHash string) (bool, error) {
 
 	n, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &memory, &iterations, &parallelism)
 	if err != nil || n != 3 {
-		return false, fmt.Errorf("failed to parse parameters: %v", err)
+		return parsedHash{}, fmt.Errorf("failed to parse parameters: %v", err)
 	}
 
 	if memory < 1 || memory > MaxMemory ||
 		iterations < 1 || iterations > MaxIterations ||
 		parallelism < 1 || parallelism > MaxParallelism {
-		return false, fmt.Errorf("hash parameters out of range")
+		return parsedHash{}, fmt.Errorf("hash parameters out of range")
 	}
 
 	//decode salt and hash (base64->raw bytes)
 	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
 	if err != nil {
-		return false, fmt.Errorf("salt decode error: %v", err)
+		return parsedHash{}, fmt.Errorf("salt decode error: %v", err)
 	}
-	storedHash, err := base64.RawStdEncoding.DecodeString(parts[5])
+
+	key, err := base64.RawStdEncoding.DecodeString(parts[5])
 	if err != nil {
-		return false, fmt.Errorf("hash decode error: %v", err)
+		return parsedHash{}, fmt.Errorf("hash decode error: %v", err)
 	}
 
 	if len(salt) < MinSaltLength {
-		return false, fmt.Errorf("salt too short: %d bytes", len(salt))
+		return parsedHash{}, fmt.Errorf("salt too short: %d bytes", len(salt))
 	}
 
-	if len(storedHash) < MinKeyLength {
-		return false, fmt.Errorf("hash too short: %d bytes", len(storedHash))
+	if len(key) < MinKeyLength {
+		return parsedHash{}, fmt.Errorf("hash too short: %d bytes", len(key))
 	}
-	if len(storedHash) > math.MaxUint32 {
-		return false, fmt.Errorf("stored hash length exceeds maximum representable key length")
+	if len(key) > math.MaxUint32 {
+		return parsedHash{}, fmt.Errorf("stored hash length exceeds maximum representable key length")
 	}
 
-	//rehash password with parsed params
-	newHash := argon2.IDKey(
-		[]byte(password),
-		salt,
-		iterations,
-		memory,
-		parallelism,
-		uint32(len(storedHash)), //nolint:gosec // exact conversion: bounds-checked above, never truncates
-	)
-
-	return subtle.ConstantTimeCompare(storedHash, newHash) == 1, nil
+	return parsedHash{
+		memory:      memory,
+		iterations:  iterations,
+		parallelism: parallelism,
+		salt:        salt,
+		key:         key,
+	}, nil
 }
