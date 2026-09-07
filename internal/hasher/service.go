@@ -65,10 +65,8 @@ func (s *Service) Hash(password string) (string, error) {
 
 	//salt generation
 	salt := make([]byte, s.config.saltLength)
-	//filling the salt slice with random bytes
-	if _, err := rand.Read(salt); err != nil {
-		return "", err
-	}
+	//filling the salt slice with random bytes. Read CANNOT return an error
+	_, _ = rand.Read(salt)
 
 	//password hash
 	hash := argon2.IDKey(

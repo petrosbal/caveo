@@ -7,46 +7,60 @@ import (
 	"testing"
 )
 
-func TestWorkflow(t *testing.T) {
-	// initialize
+// known-answer vectors from the Argon2 reference implementation.
+// source: github.com/P-H-C/phc-winner-argon2, src/test.c (hashtest calls, Argon2_id).
+// these prove Caveo agrees with the standard rather than only with itself
+var referenceVectors = []struct {
+	name     string
+	password string
+	encoded  string
+}{
+	{"baseline m=65536,t=2,p=1", "password", "$argon2id$v=19$m=65536,t=2,p=1$c29tZXNhbHQ$CTFhFdXPJO1aFaMaO6Mm5c8y7cJHAph8ArZWb2GRPPc"},
+	{"memory at MaxMemory", "password", "$argon2id$v=19$m=262144,t=2,p=1$c29tZXNhbHQ$eP4eyR+zqlZX1y5xCFTkw9m5GYx0L5YWwvCFvtlbLow"},
+	{"low memory m=256", "password", "$argon2id$v=19$m=256,t=2,p=1$c29tZXNhbHQ$nf65EOgLrQMR/uIPnA4rEsF5h7TKyQwu9U1bMCHGi/4"},
+	{"parallelism p=2", "password", "$argon2id$v=19$m=256,t=2,p=2$c29tZXNhbHQ$bQk8UB/VmZZF4Oo79iDXuL5/0ttZwg2f/5U52iv1cDc"},
+	{"single iteration t=1", "password", "$argon2id$v=19$m=65536,t=1,p=1$c29tZXNhbHQ$9qWtwbpyPd3vm1rB1GThgPzZ3/ydHL92zKL+15XZypg"},
+	{"four iterations t=4", "password", "$argon2id$v=19$m=65536,t=4,p=1$c29tZXNhbHQ$kCXUjmjvc5XMqQedpMTsOv+zyJEf5PhtGiUghW9jFyw"},
+	{"different password, same params and salt", "differentpassword", "$argon2id$v=19$m=65536,t=2,p=1$c29tZXNhbHQ$C4TWUs9rDEvq7w3+J4umqA32aWKB1+DSiRuBfYxFj94"},
+	{"different salt, same params and password", "password", "$argon2id$v=19$m=65536,t=2,p=1$ZGlmZnNhbHQ$vfMrBczELrFdWP0ZsfhWsRPaHppYdP3MVEMIVlqoFBw"},
+}
+
+func TestVerifyReferenceVectors(t *testing.T) {
 	s := NewService()
-	password := "supersafepassword2000"
 
-	// test hashing
-	hash, err := s.Hash(password)
-	if err != nil {
-		t.Fatalf("Hash failed: %v", err)
-	}
-
-	// check format (must start with $argon2id)
-	if !strings.HasPrefix(hash, "$argon2id") {
-		t.Errorf("Invalid hash format: %s", hash)
-	}
-	t.Logf("\nGenerated Hash: %s\n", hash)
-
-	// test verification (good case)
-	match, err := s.Verify(password, hash)
-	if err != nil {
-		t.Fatalf("Verify failed with error: %v", err)
-	}
-	if !match {
-		t.Error("Expected password to match, but it didn't")
-	}
-
-	// test verification (bad case)
-	match, err = s.Verify("wrong_password", hash)
-	if err != nil {
-		t.Fatalf("Verify (negative) failed with error: %v", err)
-	}
-	if match {
-		t.Error("Expected password NOT to match, but it did")
+	for _, v := range referenceVectors {
+		t.Run(v.name, func(t *testing.T) {
+			match, err := s.Verify(v.password, v.encoded)
+			if err != nil {
+				t.Fatalf("want no error, got %v", err)
+			}
+			if !match {
+				t.Error("want reference vector to verify, got no match")
+			}
+		})
 	}
 }
 
-// This hash was generated with golang.org/x/crypto v0.47.0 and must keep
-// verifying correctly regardless of which x/crypto version the module is
-// on later. The hash format is persistent data in consumers' databases;
-// this is what enforces that compatibility.
+func TestVerifyReferenceVectorsRejectWrongPassword(t *testing.T) {
+	s := NewService()
+
+	for _, v := range referenceVectors {
+		t.Run(v.name, func(t *testing.T) {
+			match, err := s.Verify("not-the-password", v.encoded)
+			if err != nil {
+				t.Fatalf("want no error, got %v", err)
+			}
+			if match {
+				t.Error("want no match for wrong password, got match")
+			}
+		})
+	}
+}
+
+// this hash was generated with golang.org/x/crypto v0.47.0 and must keep
+// verifying correctly no matter what version the module is on later.
+// the hash is persistent data in consumers' databases.
+// this is what enforces that compatibility
 func TestPinnedHash(t *testing.T) {
 	s := NewService()
 	const (
@@ -59,24 +73,84 @@ func TestPinnedHash(t *testing.T) {
 		t.Fatalf("Verify failed with error: %v", err)
 	}
 	if !match {
-		t.Error("expected pinned hash to still verify, but it didn't")
+		t.Error("want pinned hash to still verify, but it didn't")
 	}
 }
 
-func TestInvalidHashFormat(t *testing.T) {
+func TestHashVerifyRoundTrip(t *testing.T) {
+	s := NewService()
+	password := "supersafepassword2000"
+
+	hash, err := s.Hash(password)
+	if err != nil {
+		t.Fatalf("hash failed: %v", err)
+	}
+
+	if !strings.HasPrefix(hash, "$argon2id") {
+		t.Errorf("invalid hash format: %s", hash)
+	}
+
+	match, err := s.Verify(password, hash)
+	if err != nil {
+		t.Fatalf("Verify failed with error: %v", err)
+	}
+	if !match {
+		t.Error("want password to match, but it didn't")
+	}
+
+	match, err = s.Verify("wrong_password", hash)
+	if err != nil {
+		t.Fatalf("Verify (negative) failed with error: %v", err)
+	}
+	if match {
+		t.Error("want password NOT to match, but it did")
+	}
+}
+
+func TestVerifyRejectsMalformedEncoding(t *testing.T) {
 	s := NewService()
 
-	// test with garbage string
-	_, err := s.Verify("password", "not_a_hash")
-	if err == nil {
-		t.Error("Expected error for invalid hash format, got nil")
+	valid, err := s.Hash("pw")
+	if err != nil {
+		t.Fatalf("hash failed: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		evil string
+	}{
+		{"garbage string", "not_a_hash"},
+		{"too few fields", "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ"},
+		{"unsupported algorithm", replacePart(t, valid, 1, "argon2i")},
+		{"unparseable version", replacePart(t, valid, 2, "v=abc")},
+		{"unsupported version", replacePart(t, valid, 2, "v=16")},
+		{"unparseable params", replacePart(t, valid, 3, "m=x,t=2,p=1")},
+		{"missing a param", replacePart(t, valid, 3, "m=19456,t=2")},
+		{"salt is not base64", replacePart(t, valid, 4, "!!!!!!!!!!!!")},
+		{"tag is not base64", replacePart(t, valid, 5, "!!!!!!!!!!!!")},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			match, err := s.Verify("pw", c.evil)
+			if err == nil {
+				t.Errorf("want error for %s, got nil", c.name)
+			}
+			if match {
+				t.Errorf("want no match on malformed input %q, got match", c.evil)
+			}
+		})
 	}
 }
 
 func TestVerifyRejectsOutOfRangeParams(t *testing.T) {
 	s := NewService()
 
-	valid, _ := s.Hash("pw")
+	valid, err := s.Hash("pw")
+	if err != nil {
+		t.Fatalf("hash failed: %v", err)
+	}
+
 	cases := []struct {
 		name    string
 		find    string
@@ -95,7 +169,7 @@ func TestVerifyRejectsOutOfRangeParams(t *testing.T) {
 			evil := strings.Replace(valid, c.find, c.replace, 1)
 			_, err := s.Verify("pw", evil)
 			if err == nil {
-				t.Errorf("Expected error for %s, got nil", c.name)
+				t.Errorf("want error for %s, got nil", c.name)
 			}
 		})
 	}
@@ -103,12 +177,9 @@ func TestVerifyRejectsOutOfRangeParams(t *testing.T) {
 
 func TestVerifyRejectsUndersizedSaltAndHash(t *testing.T) {
 	s := NewService()
-	valid, _ := s.Hash("pw")
-
-	replacePart := func(idx int, value string) string {
-		parts := strings.Split(valid, "$")
-		parts[idx] = value
-		return strings.Join(parts, "$")
+	valid, err := s.Hash("pw")
+	if err != nil {
+		t.Fatalf("hash failed: %v", err)
 	}
 
 	b64 := func(n int) string {
@@ -119,10 +190,10 @@ func TestVerifyRejectsUndersizedSaltAndHash(t *testing.T) {
 		name string
 		evil string
 	}{
-		{"empty salt", replacePart(4, "")},
-		{"empty hash", replacePart(5, "")},
-		{"salt one byte under min", replacePart(4, b64(MinSaltLength-1))},
-		{"hash one byte under min", replacePart(5, b64(MinKeyLength-1))},
+		{"empty salt", replacePart(t, valid, 4, "")},
+		{"empty hash", replacePart(t, valid, 5, "")},
+		{"salt one byte under min", replacePart(t, valid, 4, b64(MinSaltLength-1))},
+		{"hash one byte under min", replacePart(t, valid, 5, b64(MinKeyLength-1))},
 	}
 
 	for _, c := range cases {
@@ -132,4 +203,15 @@ func TestVerifyRejectsUndersizedSaltAndHash(t *testing.T) {
 			}
 		})
 	}
+}
+
+func replacePart(t *testing.T, encoded string, idx int, value string) string {
+	t.Helper()
+
+	parts := strings.Split(encoded, "$")
+	if len(parts) != 6 {
+		t.Fatalf("input is not a 6-part hash: %q", encoded)
+	}
+	parts[idx] = value
+	return strings.Join(parts, "$")
 }
