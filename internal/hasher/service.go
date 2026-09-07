@@ -14,6 +14,10 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
+// the PHC-style encoding that Hash produces and parseHash accepts.
+// order: version, memory, iterations, parallelism, b64 salt, b64 key
+const encodedFormat = "$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s"
+
 // OWASP-recommended defaults
 // https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html
 const (
@@ -84,7 +88,7 @@ func (s *Service) Hash(password string) (string, error) {
 
 	//return formatted string
 	encoded := fmt.Sprintf(
-		"$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
+		encodedFormat,
 		argon2.Version,
 		s.config.memory,
 		s.config.iterations,
@@ -186,6 +190,19 @@ func parseHash(encodedHash string) (parsedHash, error) {
 	}
 	if len(key) > math.MaxUint32 {
 		return parsedHash{}, fmt.Errorf("stored hash length exceeds maximum representable key length")
+	}
+
+	canonical := fmt.Sprintf(
+		encodedFormat,
+		version,
+		memory,
+		iterations,
+		parallelism,
+		base64.RawStdEncoding.EncodeToString(salt),
+		base64.RawStdEncoding.EncodeToString(key),
+	)
+	if canonical != encodedHash {
+		return parsedHash{}, fmt.Errorf("hash is not in canonical form")
 	}
 
 	return parsedHash{

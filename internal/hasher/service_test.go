@@ -128,6 +128,8 @@ func TestVerifyRejectsMalformedEncoding(t *testing.T) {
 		{"missing a param", replacePart(t, valid, 3, "m=19456,t=2")},
 		{"salt is not base64", replacePart(t, valid, 4, "!!!!!!!!!!!!")},
 		{"tag is not base64", replacePart(t, valid, 5, "!!!!!!!!!!!!")},
+		{"trailing garbage on p", replacePart(t, valid, 3, fmt.Sprintf("m=%d,t=%d,p=%dGARBAGE", TargetMemory, TargetIterations, TargetParallelism))},
+		{"leading zero on memory", replacePart(t, valid, 3, fmt.Sprintf("m=0%d,t=%d,p=%d", TargetMemory, TargetIterations, TargetParallelism))},
 	}
 
 	for _, c := range cases {
