@@ -2,6 +2,8 @@
 BINARY_NAME=caveo
 ENTRY_POINT=./cmd/api
 VERSION=$(shell git describe --tags --always --dirty)
+FUZZ ?= FuzzParseHash
+FUZZTIME ?= 60s
 
 all: run
 ## help: print this help message
@@ -22,6 +24,12 @@ run: build
 test:
 	@echo "Testing..."
 	gotestsum --format testname
+
+## fuzz: run one fuzz target (make fuzz FUZZ=FuzzVerify FUZZTIME=60s)
+.PHONY: fuzz
+fuzz:
+	@echo "Fuzzing..."
+	go test -run='^$$' -fuzz=$(FUZZ) -fuzztime=$(FUZZTIME) ./internal/hasher/
 
 ## build: build the binary
 .PHONY: build
